@@ -2,6 +2,11 @@
 # https://github.com/Al-Azif/exploit-host-cc/blob/e62af4f371b994d4a62e941df8d3e2d2a1637d7e/main.py
 # urls from: https://github.com/illusion0001/hosts/blob/main/hosts
 
+#protect Y2JB 
+youtube.com
+gstatic.com
+
+
 tmdb.np.dl.playstation.net
 ps5.np.playstation.net
 ps4.np.playstation.net

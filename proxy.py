@@ -64,7 +64,6 @@ def request(flow: http.HTTPFlow) -> None:
     if is_blocked(hostname):
         flow.response = http.Response.make( 
             404,
-        
             b"uwu",
         )
         print(f"[*] Blocked HTTP request to: {hostname}")
@@ -93,72 +92,27 @@ def request(flow: http.HTTPFlow) -> None:
             )
 
     # Map 1_lapse_prepare_1 to 1_lapse_prepare_1.js
-    if "/js/1_lapse_prepare_1.js" in flow.request.path:
-        inject_path = os.path.join(os.path.dirname(__file__), "payloads", "1_lapse_prepare_1.js")
+    if "/js/lapse.js" in flow.request.path:
+        inject_path = os.path.join(os.path.dirname(__file__), "payloads", "lapse.js")
         print(f"[*] Injecting JavaScript from: {inject_path}")
 
         try:
             with open(inject_path, "rb") as f:
                 content = f.read()
-                print(f"[+] Loaded {len(content)} bytes from 1_lapse_prepare_1.js")
+                print(f"[+] Loaded {len(content)} bytes from lapse.js")
                 flow.response = http.Response.make(
                     200,
                     content,
                     {"Content-Type": "application/javascript"}
                 )
         except FileNotFoundError:
-            print(f"[!] ERROR: 1_lapse_prepare_1.js not found at {inject_path}")
+            print(f"[!] ERROR: lapse.js not found at {inject_path}")
             flow.response = http.Response.make(
                 404,
                 b"File not found: 1_lapse_prepare_1.js",
                 {"Content-Type": "text/plain"}
             )
-
-    # Map 2_lapse_prepare_2 to 2_lapse_prepare_2.js
-    if "/js/2_lapse_prepare_2.js" in flow.request.path:
-        inject_path = os.path.join(os.path.dirname(__file__), "payloads", "2_lapse_prepare_2.js")
-        print(f"[*] Injecting JavaScript from: {inject_path}")
-
-        try:
-            with open(inject_path, "rb") as f:
-                content = f.read()
-                print(f"[+] Loaded {len(content)} bytes from 2_lapse_prepare_2.js")
-                flow.response = http.Response.make(
-                    200,
-                    content,
-                    {"Content-Type": "application/javascript"}
-                )
-        except FileNotFoundError:
-            print(f"[!] ERROR: 2_lapse_prepare_2.js not found at {inject_path}")
-            flow.response = http.Response.make(
-                404,
-                b"File not found: 2_lapse_prepare_2.js",
-                {"Content-Type": "text/plain"}
-            )
-
-    # Map 3_lapse_nf to 3_lapse_nf.js
-    if "/js/3_lapse_nf.js" in flow.request.path:
-        inject_path = os.path.join(os.path.dirname(__file__), "payloads", "3_lapse_nf.js")
-        print(f"[*] Injecting JavaScript from: {inject_path}")
-
-        try:
-            with open(inject_path, "rb") as f:
-                content = f.read()
-                print(f"[+] Loaded {len(content)} bytes from 3_lapse_nf.js")
-                flow.response = http.Response.make(
-                    200,
-                    content,
-                    {"Content-Type": "application/javascript"}
-                )
-        except FileNotFoundError:
-            print(f"[!] ERROR: 3_lapse_nf.js not found at {inject_path}")
-            flow.response = http.Response.make(
-                404,
-                b"File not found: 3_lapse_nf.js",
-                {"Content-Type": "text/plain"}
-            )
-
-    # Map elfldr.elf to elfldr.elf
+            
     if "/js/elf_loader.js" in flow.request.path:
         inject_path = os.path.join(os.path.dirname(__file__), "payloads", "elf_loader.js")
         print(f"[*] Injecting JavaScript from: {inject_path}")
@@ -173,14 +127,13 @@ def request(flow: http.HTTPFlow) -> None:
                     {"Content-Type": "application/javascript"}
                 )
         except FileNotFoundError:
-            print(f"[!] ERROR: elf_loader.js not found at {inject_path}")
+            print(f"[!] ERROR: lapse.js not found at {inject_path}")
             flow.response = http.Response.make(
                 404,
                 b"File not found: elf_loader.js",
                 {"Content-Type": "text/plain"}
             )
-
-    # Map elfldr.elf to elfldr.elf
+    # Map elfldr.elf to elfldr.elf (binary)
     if "/js/elfldr.elf" in flow.request.path:
         inject_path = os.path.join(os.path.dirname(__file__), "payloads", "elfldr.elf")
         print(f"[*] Injecting JavaScript from: {inject_path}")

