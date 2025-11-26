@@ -67,7 +67,8 @@ Send payloads/lapse_ps4.js via netcat or any equivalent tool.
 
 Important Notes
 
-> [!NOTE] You will not see any output while the exploit is executing.
+> [!NOTE]
+> You will not see any output while the exploit is executing.
 If the app crashes or the PS4 kernel panics, restart the console and try again.
 
 
