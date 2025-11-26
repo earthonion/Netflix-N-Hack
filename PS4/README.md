@@ -34,6 +34,8 @@ mitmproxy -s downgrader.py --ssl-insecure
 ```
 **Console Instructions**
 
+Before continuing. set up your Internet connection and when it asks for proxy, click use, then input the local IP of the computer running mitmproxy 
+
 On your PS4:
 
 1. Go to Netflix **on the home screen**
