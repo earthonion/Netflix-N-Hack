@@ -1,54 +1,82 @@
 # Netflix N Hack for PS4 (coming soon)
 
 > [!NOTE]
-> PS4 version requires very specific circumstances to work. We have a few workarounds described below.
+> The PS4 version requires very specific circumstances to work. Workarounds are included below.
 
-## Compatibility 
+## Compatibility
 
-Before you proceed, please ensure you meet these criteria 
+Before proceeding, ensure the following:
 
-1. Netflix (with license) installed on your PS4 below the latest version 
-    - If you have existing Jailbreak, you can just install the vulnerable version.
-    - this is useful if you can't afford BD-JB or are stuck using PPPwn 
-    - if you are on latest firmware, you can downgrade via mitm by downloading from PSN. You cannot jailbreak, however you will be prepared for if a new kernel exploit comes out .
+1. **Netflix (with license) installed on your PS4 below the latest version**
+    - If you have an existing jailbreak, simply install the vulnerable version.
+    - This is useful if you can’t afford BD-JB or are stuck using PPPwn.
+    - If you are on the latest firmware, you *can* downgrade Netflix via MITM by downloading from PSN.  
+      You **cannot jailbreak**, but you will be prepared if a new kernel exploit releases.
 
-2. Have PS4 Firmware version between 9.00 and 12.02 (for lapse exploit)
+2. **PS4 Firmware version must be between 9.00 and 12.02** (required for the Lapse exploit)
 
+---
 
-## Downgrading Netflix 
+## Downgrading Netflix
 
-Prerequisites:
+### Prerequisites
 - Python
-- mitmproxy 
+- mitmproxy
 - Internet access
 
-```
-#install mitmproxy 
-pip install mitmproxy 
+### Install & Run Downgrade Proxy
+```bash
+# Install mitmproxy
+pip install mitmproxy
 
-#start downgrade proxy
+# Start the downgrade proxy
 mitmproxy -s downgrader.py --ssl-insecure
 ```
- 
-Then on your console, go to Netflix press **Options** and **Check for Updates**
+**Console Instructions**
 
-It will show that it is downloading latest version, but after installing it should be 1.53
+On your PS4:
+
+1. Open Netflix
+
+
+2. Press **Options** on your controller 
+
+
+3. Select **Check for Updates**
+
+
+
+It will appear to download the newest version, but after install it should downgrade to **1.53**.
+
+
+---
 
 ## Exploit
 
-```
+### Start MITM Proxy
+
+```bash
 mitmproxy -s proxy.py
 ```
 
-then just simply open Netflix (should take about 30 seconds)
+Then simply open Netflix on your PS4.
+(Exploit initialization takes ~30 seconds.)
 
-This will spawn Remote JS payload server. Send `payloads/lapse_ps4.js` via netcat or equivalent 
+This will spawn the Remote JS payload server.
+Send payloads/lapse_ps4.js via netcat or any equivalent tool.
 
-> [!NOTE]
-> You will not see any output while exploit is executing. If the app crashes, or PS4 Kernel Panics. Restart console and try again 
+Important Notes
 
-This will spawn a bin loader on port 9021
+> [!NOTE] You will not see any output while the exploit is executing.
+If the app crashes or the PS4 kernel panics, restart the console and try again.
 
-Then you can send your HEN of choice 
 
-If you run into any issues message me on discord!
+
+Once complete, the exploit spawns a bin loader on port 9021.
+
+Now you can send any HEN payload of your choice.
+
+
+---
+
+If you run into issues, feel free to message me on Discord!
