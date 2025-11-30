@@ -15,7 +15,7 @@ Before proceeding, ensure the following:
     - If you are on the latest firmware, you *can* downgrade Netflix via MITM by downloading from PSN.  
       You **cannot jailbreak**, but you will be prepared if a new kernel exploit releases.
 
-2. **PS4 Firmware version must be between 9.00 and 12.02** (required for the Lapse exploit)
+2. **PS4 Firmware version must be between 8.00 and 12.02** (required for the Lapse exploit)
 
 ---
 
