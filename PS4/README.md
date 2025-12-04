@@ -67,21 +67,19 @@ mitmproxy -s proxy.py
 Then simply open Netflix on your PS4.
 (Exploit initialization takes ~30 seconds.)
 
-This will spawn the Remote JS payload server.
-Send `payloads/lapse_binloader.js` via netcat or any equivalent tool.
-
-
 # Important Notes
 
 > [!NOTE]
-> You will not see any output while the exploit is executing.
-If the app crashes or the PS4 kernel panics, restart the console and try again.
+> If PS4 kernel panics, or lapse fails restart the console and try again.
+>
+> if Netflix crashes, just restart Netflix
 
+Once complete, the exploit will look for a payload in `/data/payload.bin` if it is not found it will look on the root of a plugged in USB drive named `payload.bin` and will automatically copy it to `/data/payload.bin`.
 
+after initial exploit, USB is no longer needed. 
 
-Once complete, the exploit spawns a bin loader on port 9021.
+if payload is not found on either the USB or `/data/payload.bin`, a binloader will spawn on port 9021 for you to send via netcat or equivalent
 
-Now you can send any HEN payload of your choice.
 
 # Credits
 - HelloYunho for all the advise on porting lapse, and latest fw downgrade method 
