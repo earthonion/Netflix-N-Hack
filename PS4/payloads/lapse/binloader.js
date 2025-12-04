@@ -5,7 +5,7 @@
 // Constants
 const BIN_LOADER_PORT = 9021;
 const MAX_PAYLOAD_SIZE = 4 * 1024 * 1024;  // 4MB max
-const READ_CHUNK = 4096;
+const READ_CHUNK = 32768;  // 32KB chunks for faster transfer
 
 // Thrd_create offset in libc.prx (verified via Ghidra)
 const THRD_CREATE_OFFSET = 0x4c770n;
@@ -88,6 +88,42 @@ function bl_is_error(val) {
     return val === -1 || val === 0xffffffff;
 }
 
+// Fast memory copy - copies in 8-byte chunks, then remaining bytes
+function bl_fast_copy(dst, src, len) {
+    const qwords = Math.floor(len / 8);
+    const remainder = len % 8;
+
+    // Copy 8 bytes at a time
+    for (let i = 0; i < qwords; i++) {
+        const val = read64_uncompressed(src + BigInt(i * 8));
+        write64_uncompressed(dst + BigInt(i * 8), val);
+    }
+
+    // Copy remaining bytes
+    const base = qwords * 8;
+    for (let i = 0; i < remainder; i++) {
+        const byte = read8_uncompressed(src + BigInt(base + i));
+        write8_uncompressed(dst + BigInt(base + i), byte);
+    }
+}
+
+// Fast memory zero - zeroes in 8-byte chunks, then remaining bytes
+function bl_fast_zero(dst, len) {
+    const qwords = Math.floor(len / 8);
+    const remainder = len % 8;
+
+    // Zero 8 bytes at a time
+    for (let i = 0; i < qwords; i++) {
+        write64_uncompressed(dst + BigInt(i * 8), 0n);
+    }
+
+    // Zero remaining bytes
+    const base = qwords * 8;
+    for (let i = 0; i < remainder; i++) {
+        write8_uncompressed(dst + BigInt(base + i), 0);
+    }
+}
+
 // Read ELF header from buffer
 function bl_read_elf_header(buf_addr) {
     return {
@@ -116,8 +152,7 @@ function bl_read_program_header(buf_addr, offset) {
 function bl_load_elf_segments(buf_addr, base_addr) {
     const elf = bl_read_elf_header(buf_addr);
 
-    logger.log("ELF entry: " + hex(elf.e_entry));
-    logger.log("Program headers: " + elf.e_phnum + " @ offset " + hex(elf.e_phoff));
+    logger.log("ELF: " + elf.e_phnum + " segments, entry @ " + hex(elf.e_entry));
 
     for (let i = 0; i < elf.e_phnum; i++) {
         const phdr_offset = Number(elf.e_phoff) + i * elf.e_phentsize;
@@ -128,24 +163,18 @@ function bl_load_elf_segments(buf_addr, base_addr) {
             const seg_offset = segment.p_vaddr & 0xffffffn;
             const seg_addr = base_addr + seg_offset;
 
-            logger.log("Loading segment " + i + ":");
-            logger.log("  vaddr: " + hex(segment.p_vaddr));
-            logger.log("  filesz: " + hex(segment.p_filesz));
-            logger.log("  -> " + hex(seg_addr));
+            // Reduced logging for speed - uncomment for debug
+            // logger.log("Seg " + i + ": " + hex(segment.p_filesz) + " -> " + hex(seg_addr));
 
-            // Copy segment data
+            // Copy segment data using fast 8-byte copy
             const filesz = Number(segment.p_filesz);
             const src_addr = buf_addr + segment.p_offset;
+            bl_fast_copy(seg_addr, src_addr, filesz);
 
-            for (let j = 0; j < filesz; j++) {
-                const byte = read8_uncompressed(src_addr + BigInt(j));
-                write8_uncompressed(seg_addr + BigInt(j), byte);
-            }
-
-            // Zero remaining memory (memsz - filesz)
+            // Zero remaining memory (memsz - filesz) using fast zero
             const memsz = Number(segment.p_memsz);
-            for (let j = filesz; j < memsz; j++) {
-                write8_uncompressed(seg_addr + BigInt(j), 0);
+            if (memsz > filesz) {
+                bl_fast_zero(seg_addr + BigInt(filesz), memsz - filesz);
             }
         }
     }
@@ -199,11 +228,8 @@ BinLoader.init = function(bin_data_addr, bin_size) {
         logger.log("Detected ELF binary, parsing headers...");
         BinLoader.entry_point = bl_load_elf_segments(bin_data_addr, BinLoader.mmap_base);
     } else {
-        logger.log("Non-ELF binary, treating as raw shellcode");
-        for (let i = 0; i < bin_size; i++) {
-            const byte = read8_uncompressed(bin_data_addr + BigInt(i));
-            write8_uncompressed(BinLoader.mmap_base + BigInt(i), byte);
-        }
+        logger.log("Non-ELF binary, treating as raw shellcode (" + bin_size + " bytes)");
+        bl_fast_copy(BinLoader.mmap_base, bin_data_addr, bin_size);
         BinLoader.entry_point = BinLoader.mmap_base;
     }
 
@@ -364,16 +390,19 @@ function bl_create_listen_socket(port) {
 
 // Read payload data from client socket
 function bl_read_payload_from_socket(client_sock, max_size) {
-    const buf = malloc(READ_CHUNK);
     const payload_buf = malloc(max_size);
     let total_read = 0;
 
     while (total_read < max_size) {
+        // Read directly into payload buffer at current offset
+        const remaining = max_size - total_read;
+        const chunk_size = remaining < READ_CHUNK ? remaining : READ_CHUNK;
+
         const read_size = syscall(
             BigInt(BL_SYSCALL.read),
             BigInt(client_sock),
-            buf,
-            BigInt(READ_CHUNK)
+            payload_buf + BigInt(total_read),  // Read directly to destination
+            BigInt(chunk_size)
         );
 
         if (bl_is_error(read_size)) {
@@ -384,17 +413,11 @@ function bl_read_payload_from_socket(client_sock, max_size) {
             break;  // EOF
         }
 
-        const bytes_read = Number(read_size);
+        total_read += Number(read_size);
 
-        for (let j = 0; j < bytes_read; j++) {
-            write8_uncompressed(payload_buf + BigInt(total_read + j),
-                               read8_uncompressed(buf + BigInt(j)));
-        }
-
-        total_read += bytes_read;
-
-        if (total_read % (64 * 1024) === 0) {
-            logger.log("Received " + total_read + " bytes...");
+        // Progress update every 128KB
+        if (total_read % (128 * 1024) === 0) {
+            logger.log("Received " + (total_read / 1024) + " KB...");
         }
     }
 
