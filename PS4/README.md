@@ -76,6 +76,8 @@ Then simply open Netflix
 mitmproxy -s proxy.py
 ```
 
+### Set your proxy in ps4 network settings to your local ip (machine running mitmproxy)
+
 Then simply open Netflix on your PS4.
 (Exploit initialization takes ~30 seconds.)
 
