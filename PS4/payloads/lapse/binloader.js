@@ -30,7 +30,10 @@ const BL_SO_REUSEADDR = 4n;
 const BL_SYSCALL = {
     read: 0x3,
     write: 0x4,
+    open: 0x5,
     close: 0x6,
+    stat: 0xbc,       // 188 - stat (for checking file existence)
+    fstat: 0x189,     // 393 - fstat
     socket: 0x61,
     bind: 0x68,
     listen: 0x6a,
@@ -45,6 +48,26 @@ const BL_SYSCALL = {
     nanosleep: 0xf0,
     is_in_sandbox: 0x249,
 };
+
+// File open flags
+const O_RDONLY = 0n;
+const O_WRONLY = 1n;
+const O_RDWR = 2n;
+const O_CREAT = 0x200n;
+const O_TRUNC = 0x400n;
+
+// USB and data paths (check usb0-usb4 like BD-JB does)
+const USB_PAYLOAD_PATHS = [
+    "/mnt/usb0/payload.bin",
+    "/mnt/usb1/payload.bin",
+    "/mnt/usb2/payload.bin",
+    "/mnt/usb3/payload.bin",
+    "/mnt/usb4/payload.bin"
+];
+const DATA_PAYLOAD_PATH = "/data/payload.bin";
+
+// S_ISREG macro check - file type is regular file
+const S_IFREG = 0x8000;
 
 // Note: When integrated into lapse_ps4.js, use SYSCALL instead of BL_SYSCALL
 
@@ -122,6 +145,184 @@ function bl_fast_zero(dst, len) {
     for (let i = 0; i < remainder; i++) {
         write8_uncompressed(dst + BigInt(base + i), 0);
     }
+}
+
+// Helper: Allocate string in memory and return address
+function bl_alloc_string(str) {
+    const addr = malloc(str.length + 1);
+    for (let i = 0; i < str.length; i++) {
+        write8_uncompressed(addr + BigInt(i), str.charCodeAt(i));
+    }
+    write8_uncompressed(addr + BigInt(str.length), 0);  // null terminator
+    return addr;
+}
+
+// Helper: Get file size using fstat
+function bl_get_file_size(fd) {
+    // struct stat is 0x78 bytes on FreeBSD
+    const stat_buf = malloc(0x78);
+    const ret = syscall(BigInt(BL_SYSCALL.fstat), fd, stat_buf);
+    if (bl_is_error(ret)) {
+        return -1;
+    }
+    // st_size is at offset 0x48 in struct stat
+    const size = read64_uncompressed(stat_buf + 0x48n);
+    return Number(size);
+}
+
+// Helper: Check if file exists using stat() and return size, or -1 if not found
+// Uses stat syscall (188) like BD-JB does instead of open/fstat/close
+function bl_file_exists(path) {
+    logger.log("Checking: " + path);
+    const path_addr = bl_alloc_string(path);
+
+    // struct stat layout on PS4 (determined via testing):
+    // st_dev:    4 bytes (offset 0x00)
+    // ???:       4 bytes (offset 0x04)
+    // st_mode:   2 bytes (offset 0x08)  <- 0x81xx = regular file, 0x41xx = directory
+    // ???:       2 bytes (offset 0x0A)
+    // ...
+    // st_size:   8 bytes (offset 0x48)
+    const stat_buf = malloc(0x78);
+
+    // Call stat(path, &stat_buf)
+    const ret = syscall(BigInt(BL_SYSCALL.stat), path_addr, stat_buf);
+
+    if (bl_is_error(ret)) {
+        logger.log("  stat() failed - file not found");
+        return -1;
+    }
+
+    // Check st_mode at offset 0x08 to see if it's a regular file
+    const st_mode = Number(read16_uncompressed(stat_buf + 0x08n));
+
+    // Check S_ISREG (mode & 0xF000) == S_IFREG (0x8000)
+    if ((st_mode & 0xF000) !== S_IFREG) {
+        logger.log("  Not a regular file (st_mode=" + hex(st_mode) + ")");
+        return -1;
+    }
+
+    // st_size is at offset 0x48 in struct stat (int64_t)
+    const size = Number(read64_uncompressed(stat_buf + 0x48n));
+    logger.log("  Found: " + size + " bytes");
+
+    return size;
+}
+
+// Get file size using stat() (fstat doesn't work on PS4)
+function bl_get_file_size_stat(path) {
+    const path_addr = bl_alloc_string(path);
+    const stat_buf = malloc(0x78);
+
+    const ret = syscall(BigInt(BL_SYSCALL.stat), path_addr, stat_buf);
+    if (bl_is_error(ret)) {
+        return -1;
+    }
+
+    // st_size is at offset 0x48
+    return Number(read64_uncompressed(stat_buf + 0x48n));
+}
+
+// Read entire file into memory buffer
+function bl_read_file(path) {
+    // Use stat() to get file size (fstat doesn't work on PS4)
+    const size = bl_get_file_size_stat(path);
+    if (size <= 0) {
+        logger.log("  stat failed or size=0");
+        return null;
+    }
+
+    const path_addr = bl_alloc_string(path);
+    const fd = syscall(BigInt(BL_SYSCALL.open), path_addr, O_RDONLY, 0n);
+    if (bl_is_error(fd)) {
+        logger.log("  open failed");
+        return null;
+    }
+
+    const buf = malloc(size);
+    let total_read = 0;
+
+    while (total_read < size) {
+        const chunk = size - total_read > READ_CHUNK ? READ_CHUNK : size - total_read;
+        const bytes_read = syscall(
+            BigInt(BL_SYSCALL.read),
+            fd,
+            buf + BigInt(total_read),
+            BigInt(chunk)
+        );
+
+        if (bl_is_error(bytes_read) || bytes_read === 0n) {
+            break;
+        }
+        total_read += Number(bytes_read);
+    }
+
+    syscall(BigInt(BL_SYSCALL.close), fd);
+
+    if (total_read !== size) {
+        logger.log("  read incomplete: " + total_read + "/" + size);
+        return null;
+    }
+
+    return { buf: buf, size: size };
+}
+
+// Write buffer to file
+function bl_write_file(path, buf, size) {
+    const path_addr = bl_alloc_string(path);
+    const flags = O_WRONLY | O_CREAT | O_TRUNC;
+    logger.log("  write_file: open(" + path + ", flags=" + hex(Number(flags)) + ")");
+
+    const fd = syscall(BigInt(BL_SYSCALL.open), path_addr, flags, 0o755n);
+    logger.log("  write_file: fd=" + (typeof fd === 'bigint' ? hex(fd) : fd));
+
+    if (bl_is_error(fd)) {
+        logger.log("  write_file: open failed");
+        return false;
+    }
+
+    let total_written = 0;
+    while (total_written < size) {
+        const chunk = size - total_written > READ_CHUNK ? READ_CHUNK : size - total_written;
+        const bytes_written = syscall(
+            BigInt(BL_SYSCALL.write),
+            fd,
+            buf + BigInt(total_written),
+            BigInt(chunk)
+        );
+
+        if (bl_is_error(bytes_written) || bytes_written === 0n) {
+            logger.log("  write_file: write failed at " + total_written + "/" + size);
+            syscall(BigInt(BL_SYSCALL.close), fd);
+            return false;
+        }
+        total_written += Number(bytes_written);
+    }
+
+    syscall(BigInt(BL_SYSCALL.close), fd);
+    logger.log("  write_file: wrote " + total_written + " bytes");
+    return true;
+}
+
+// Copy file from src to dst
+function bl_copy_file(src_path, dst_path) {
+    logger.log("Copying " + src_path + " -> " + dst_path);
+
+    const data = bl_read_file(src_path);
+    if (data === null) {
+        logger.log("Failed to read source file");
+        return false;
+    }
+
+    logger.log("Read " + data.size + " bytes");
+
+    if (!bl_write_file(dst_path, data.buf, data.size)) {
+        logger.log("Failed to write destination file");
+        return false;
+    }
+
+    logger.log("Copy complete");
+    return true;
 }
 
 // Read ELF header from buffer
@@ -251,9 +452,9 @@ function spawn_payload_thread_and_wait(entry_point, args) {
     const thr_handle_addr = malloc(8);
     const timespec_addr = malloc(16);
 
-    // Setup timespec for nanosleep: 0.5 second delay to let thread start
-    write64_uncompressed(timespec_addr, 0n);           // tv_sec = 0
-    write64_uncompressed(timespec_addr + 8n, 500000000n);  // tv_nsec = 500ms
+    // Setup timespec for nanosleep: 1 second delay to let thread start
+    write64_uncompressed(timespec_addr, 1n);           // tv_sec = 1
+    write64_uncompressed(timespec_addr + 8n, 0n);      // tv_nsec = 0
 
     // Build args structure for the payload
     const rwpipe = malloc(8);
@@ -319,7 +520,6 @@ function spawn_payload_thread_and_wait(entry_point, args) {
 
     // =====================================================
     // Part 3: SIGKILL just our process (Netflix app)
-    // Don't use negative PID - that kills the whole process group including ShellUI!
     // =====================================================
     fake_rop[i++] = eboot_base + g.pop_rdi;
     fake_rop[i++] = pid;  // Just our PID, not process group
@@ -424,17 +624,39 @@ function bl_read_payload_from_socket(client_sock, max_size) {
     return { buf: payload_buf, size: total_read };
 }
 
-// Main bin_loader function
-function bin_loader_main() {
-    logger.log("=== PS4 Binary Loader ===");
+// Load and run payload from file
+function bl_load_from_file(path) {
+    logger.log("Loading payload from: " + path);
 
-    if (!bl_is_jailbroken()) {
-        logger.log("ERROR: Console is not jailbroken");
-        send_notification("Jailbreak failed!\nNot jailbroken.");
+    const payload = bl_read_file(path);
+    if (payload === null) {
+        logger.log("Failed to read payload file");
         return false;
     }
 
-    logger.log("Console is jailbroken, starting payload server...");
+    logger.log("Read " + payload.size + " bytes");
+
+    if (payload.size < 64) {
+        logger.log("ERROR: Payload too small");
+        return false;
+    }
+
+    try {
+        BinLoader.init(payload.buf, payload.size);
+        BinLoader.run();
+        logger.log("Payload spawned successfully");
+    } catch (e) {
+        logger.log("ERROR loading payload: " + e.message);
+        if (e.stack) logger.log(e.stack);
+        return false;
+    }
+
+    return true;
+}
+
+// Network binloader (fallback)
+function bl_network_loader() {
+    logger.log("Starting network payload server...");
 
     let server_sock;
     try {
@@ -505,4 +727,53 @@ function bin_loader_main() {
 
     return true;
 }
+
+// Main entry point with USB loader logic
+function bin_loader_main() {
+    logger.log("=== PS4 Payload Loader ===");
+
+    if (!bl_is_jailbroken()) {
+        logger.log("ERROR: Console is not jailbroken");
+        send_notification("Jailbreak failed!\nNot jailbroken.");
+        return false;
+    }
+
+    logger.log("Console is jailbroken");
+
+    // Priority 1: Check for USB payload on usb0-usb4 (like BD-JB does)
+    for (let i = 0; i < USB_PAYLOAD_PATHS.length; i++) {
+        const usb_path = USB_PAYLOAD_PATHS[i];
+        const usb_size = bl_file_exists(usb_path);
+
+        if (usb_size > 0) {
+            logger.log("Found USB payload: " + usb_path + " (" + usb_size + " bytes)");
+            send_notification("USB payload found!\nCopying to /data...");
+
+            // Copy USB payload to /data for future use
+            if (bl_copy_file(usb_path, DATA_PAYLOAD_PATH)) {
+                logger.log("Copied to " + DATA_PAYLOAD_PATH);
+            } else {
+                logger.log("Warning: Failed to copy to /data, running from USB");
+            }
+
+            // Load from USB
+            send_notification("Loading USB payload...");
+            return bl_load_from_file(usb_path);
+        }
+    }
+
+    // Priority 2: Check for cached /data payload
+    const data_size = bl_file_exists(DATA_PAYLOAD_PATH);
+    if (data_size > 0) {
+        logger.log("Found cached payload: " + DATA_PAYLOAD_PATH + " (" + data_size + " bytes)");
+        send_notification("Loading cached payload...");
+        return bl_load_from_file(DATA_PAYLOAD_PATH);
+    }
+
+    // Priority 3: Fall back to network loader
+    logger.log("No payload file found, starting network loader");
+    send_notification("No payload found.\nStarting network loader...");
+    return bl_network_loader();
+}
+
 bin_loader_main()
