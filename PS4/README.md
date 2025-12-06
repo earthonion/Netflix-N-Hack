@@ -58,7 +58,7 @@ On your PS4:
 
 
 if its successfully downgraded but you get a "forced update message",**if you already have a jailbreak** FTP into /user/download/CUSA00XXX (whichever region you are in)
-and rename "download0_info.dat" to "download0_info0.dat"
+and delete "download0_info.dat"
 
 ---
 
