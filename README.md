@@ -15,13 +15,13 @@ Lowest working version: https://prosperopatches.com/PPSA01614?v=05.000.000 (Need
 > [!IMPORTANT]
 > Jailbreaking or modifying your console falls outside the manufacturer’s intended use.  
 Any execution of unsigned or custom code is performed **solely at your own risk**.
-
+>
 > By using this project, you acknowledge that:
-
+>
 > - You assume full responsibility for any damage, data loss, or system instability.  
 > - The contributors and maintainers of this repository **cannot be held liable** for any issues arising from the use of this code or any related instructions.  
 > - This project is provided **“as is”**, without warranty of any kind, express or implied.
-
+>
 > Proceed only if you understand and accept these risks.
 
 Having issues? Let me know on [Discord](https://discord.gg/QMGHzzW89V)
